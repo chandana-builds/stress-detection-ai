@@ -1,66 +1,125 @@
+"""
+Local-only stress detection script.
+This is for testing locally only - NOT for Streamlit Cloud.
+
+To run locally:
+    python main.py
+
+For Streamlit Cloud deployment, use:
+    streamlit run app.py
+"""
+
 import cv2
-from deepface import DeepFace
+import os
+import sys
 from textblob import TextBlob
 
 # Function: Analyze text sentiment
 def analyze_text(text):
-    blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
+    try:
+        blob = TextBlob(text)
+        polarity = blob.sentiment.polarity
 
-    if polarity > 0:
-        return "Positive", polarity
-    elif polarity < 0:
-        return "Negative", polarity
-    else:
-        return "Neutral", polarity
+        if polarity > 0.1:
+            return "Positive", polarity
+        elif polarity < -0.1:
+            return "Negative", abs(polarity)
+        else:
+            return "Neutral", 0
+    except:
+        return "Neutral", 0
 
 # Function: Determine stress level
 def detect_stress(emotion, sentiment):
-    if emotion in ["sad", "angry", "fear"] and sentiment == "Negative":
+    stress_score = 0
+
+    if emotion in ["angry", "fear", "sad"]:
+        stress_score += 2
+    elif emotion == "neutral":
+        stress_score += 1
+
+    if sentiment == "Negative":
+        stress_score += 2
+    elif sentiment == "Neutral":
+        stress_score += 1
+
+    if stress_score >= 3:
         return "High Stress"
-    elif emotion in ["happy", "surprise"] and sentiment == "Positive":
-        return "Low Stress"
-    else:
+    elif stress_score == 2:
         return "Moderate Stress"
+    else:
+        return "Low Stress"
 
-# Start webcam
-cap = cv2.VideoCapture(0)
+def main():
+    if __name__ != "__main__":
+        return
+    
+    print("⚠️  This is a local-only script.")
+    print("For web deployment, use: streamlit run app.py\n")
+    
+    try:
+        from deepface import DeepFace
+    except ImportError:
+        print("ERROR: deepface not installed")
+        print("Install with: pip install -r requirements.txt")
+        return
 
-print("Press 'q' to capture emotion and proceed...")
+    # Start webcam
+    cap = cv2.VideoCapture(0)
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    if not cap.isOpened():
+        print("ERROR: Could not open webcam")
+        return
 
-    cv2.imshow("Camera - Press q to capture", frame)
+    print("Press 'q' to capture emotion and proceed...")
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    frame = None
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-cap.release()
-cv2.destroyAllWindows()
+        cv2.imshow("Camera - Press q to capture", frame)
 
-# Save captured frame
-cv2.imwrite("captured_face.jpg", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-# Emotion detection using DeepFace
-try:
-    result = DeepFace.analyze(img_path="captured_face.jpg", actions=['emotion'])
-    emotion = result[0]['dominant_emotion']
-except:
-    emotion = "neutral"
+    cap.release()
+    cv2.destroyAllWindows()
 
-print(f"\nDetected Emotion: {emotion}")
+    # Save captured frame
+    cv2.imwrite("captured_face.jpg", frame)
 
-# Text input
-text = input("\nEnter how you feel (text): ")
+    # Emotion detection using DeepFace
+    try:
+        result = DeepFace.analyze(img_path="captured_face.jpg", actions=['emotion'], silent=True)
+        emotion = result[0]['dominant_emotion']
+    except:
+        emotion = "neutral"
 
-sentiment, polarity = analyze_text(text)
+    print(f"\n🎭 Detected Emotion: {emotion}")
 
-print(f"Text Sentiment: {sentiment} (Polarity: {polarity})")
+    # Text input
+    text = input("\n📝 Enter how you feel (text): ").strip()
 
-# Stress prediction
-stress = detect_stress(emotion, sentiment)
+    if not text:
+        sentiment = "Neutral"
+        polarity = 0
+    else:
+        sentiment, polarity = analyze_text(text)
 
-print(f"\n🧠 Final Stress Level: {stress}")
+    print(f"📊 Text Sentiment: {sentiment} (Polarity: {polarity:.2f})")
+
+    # Stress prediction
+    stress = detect_stress(emotion, sentiment)
+
+    print(f"\n🧠 Final Stress Level: {stress}")
+    
+    # Cleanup
+    try:
+        os.remove("captured_face.jpg")
+    except:
+        pass
+
+if __name__ == "__main__":
+    main()

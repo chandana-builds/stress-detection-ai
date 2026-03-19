@@ -3,171 +3,197 @@ import os
 import cv2
 import tempfile
 from textblob import TextBlob
+import numpy as np
+from PIL import Image
+import io
 
-# -------- CONFIG --------
 st.set_page_config(page_title="Stress Detection AI", layout="centered")
-st.title("🧠 Multi-Modal Stress Detection System")
-st.caption("AI-based Emotion + NLP Stress Detection")
+st.title("🧠 Stress Detection System")
+st.caption("Face + Text based Stress Analysis")
 
-IS_DEPLOY = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
+IS_DEPLOY = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true" or os.getenv("STREAMLIT_APP") is not None
 
-# -------- FACE DETECTION (ROBUST) --------
-face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
-
-def is_face_present(image_path):
-    img = cv2.imread(image_path)
-    if img is None:
-        return False
-
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # Try multiple scales for better accuracy
-    faces = face_cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=4,
-        minSize=(30, 30)
+# -------- FACE DETECTION (STRICT) --------
+@st.cache_resource
+def load_face_cascade():
+    return cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     )
 
-    # Fallback: upscale and try again
-    if len(faces) == 0:
-        resized = cv2.resize(gray, None, fx=1.5, fy=1.5)
+face_cascade = load_face_cascade()
+
+def detect_face(image_path):
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            return False
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
         faces = face_cascade.detectMultiScale(
-            resized,
-            scaleFactor=1.1,
-            minNeighbors=4,
-            minSize=(30, 30)
+            gray,
+            scaleFactor=1.2,
+            minNeighbors=6,
+            minSize=(40, 40)
         )
 
-    return len(faces) > 0
+        return len(faces) > 0
+    except Exception as e:
+        st.error(f"Face detection error: {str(e)}")
+        return False
+
+# -------- LOAD DEEPFACE MODEL --------
+@st.cache_resource
+def load_deepface_model():
+    try:
+        from deepface import DeepFace
+        # Pre-load model to avoid timeout
+        return DeepFace
+    except ImportError:
+        st.error("DeepFace not installed")
+        return None
+
+# -------- ANALYZE EMOTION --------
+@st.cache_data
+def analyze_emotion(image_path):
+    try:
+        DeepFace = load_deepface_model()
+        if DeepFace is None:
+            return "Error"
+        
+        result = DeepFace.analyze(
+            img_path=image_path,
+            actions=['emotion'],
+            enforce_detection=True,
+            silent=True
+        )
+        return result[0]['dominant_emotion']
+    except Exception as e:
+        return "Error"
 
 # -------- NLP --------
-def analyze_fast(text):
-    blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
-    sentiment = "Negative" if polarity < 0 else "Positive"
-    return sentiment, abs(polarity)
-
+@st.cache_data
 def analyze_text(text):
-    # Always safe for cloud
-    return analyze_fast(text)
+    try:
+        blob = TextBlob(text)
+        polarity = blob.sentiment.polarity
 
-# -------- INPUT MODE --------
-mode = st.radio(
-    "Choose Input Method:",
-    ["Upload Image", "Capture Image", "Real-Time Webcam"]
-)
+        if polarity < -0.1:
+            return "Negative", abs(polarity)
+        elif polarity > 0.1:
+            return "Positive", polarity
+        else:
+            return "Neutral", 0
+    except:
+        return "Neutral", 0
+
+# -------- INPUT --------
+mode = st.radio("Choose Input", ["Upload", "Camera"])
 
 emotion = "Not detected"
 
-# -------- IMAGE INPUT --------
-if mode in ["Upload Image", "Capture Image"]:
-
-    file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"]) \
-        if mode == "Upload Image" else st.camera_input("Capture Image")
+# -------- IMAGE --------
+if mode in ["Upload", "Camera"]:
+    file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"]) if mode=="Upload" else st.camera_input("Capture Image")
 
     if file:
-        st.image(file, use_column_width=True)
+        # Display image
+        st.image(file)
 
-        tfile = tempfile.NamedTemporaryFile(delete=False)
-        tfile.write(file.read())
-        image_path = tfile.name
+        # Save to temporary file
+        try:
+            tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+            tfile.write(file.read())
+            tfile.flush()
+            temp_path = tfile.name
+            tfile.close()
 
-        if not is_face_present(image_path):
-            st.error("❌ No human face detected (try clearer front face)")
-            emotion = "No Face"
-        else:
-            # Try DeepFace safely
+            # Check if face exists
+            if not detect_face(temp_path):
+                st.error("❌ No human face detected")
+                emotion = "No Face"
+            else:
+                if not IS_DEPLOY:
+                    # Local: Use full DeepFace
+                    emotion = analyze_emotion(temp_path)
+                else:
+                    # Cloud: Use basic detection only
+                    st.info("ℹ️ Using face detection only (full analysis on local)")
+                    emotion = "Face Detected"
+            
+            # Cleanup
+            import os as os_module
             try:
-                from deepface import DeepFace
+                os_module.unlink(temp_path)
+            except:
+                pass
 
-                result = DeepFace.analyze(
-                    img_path=image_path,
-                    actions=['emotion'],
-                    enforce_detection=True
-                )
-                emotion = result[0]['dominant_emotion']
-
-            except Exception as e:
-                # Cloud fallback (no crash)
-                emotion = "Face Detected (AI unavailable here)"
-                st.info("ℹ️ Emotion model not available in this environment")
-
-# -------- WEBCAM --------
-elif mode == "Real-Time Webcam":
-
-    try:
-        from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-        from deepface import DeepFace
-
-        class EmotionDetector(VideoTransformerBase):
-            def __init__(self):
-                self.emotion = "Detecting..."
-
-            def transform(self, frame):
-                img = frame.to_ndarray(format="bgr24")
-                try:
-                    result = DeepFace.analyze(
-                        img,
-                        actions=['emotion'],
-                        enforce_detection=False
-                    )
-                    if result and 'dominant_emotion' in result[0]:
-                        self.emotion = result[0]['dominant_emotion']
-                except:
-                    pass
-                return img
-
-        webrtc_ctx = webrtc_streamer(
-            key="webcam",
-            video_transformer_factory=EmotionDetector
-        )
-
-        if webrtc_ctx.video_transformer:
-            emotion = webrtc_ctx.video_transformer.emotion
-
-    except:
-        st.warning("⚠️ Webcam not supported in this environment")
+        except Exception as e:
+            st.error(f"Error processing image: {str(e)}")
+            emotion = "Error"
 
 # -------- TEXT --------
-text = st.text_area("💬 Enter your thoughts")
+st.markdown("---")
+st.subheader("📝 Your Thoughts")
+text = st.text_area("Enter how you feel", height=100, placeholder="Describe your current feelings...")
 
-# -------- STRESS --------
-def compute_stress(emotion, sentiment):
+# -------- STRESS CALCULATION --------
+def stress_calc(emotion, sentiment):
     score = 0
 
+    # Emotion scoring
     if emotion in ["sad", "angry", "fear"]:
         score += 50
+    elif emotion == "disgust":
+        score += 40
     elif emotion == "neutral":
         score += 20
+    elif emotion == "surprise":
+        score += 15
+    elif emotion == "happy":
+        score += 5
+    elif emotion == "Face Detected":
+        score += 15
 
+    # Sentiment scoring
     if sentiment == "Negative":
         score += 40
+    elif sentiment == "Neutral":
+        score += 15
 
     return min(score, 100)
 
 # -------- ANALYZE --------
-if st.button("Analyze Stress"):
+if st.button("🔍 Analyze", use_container_width=True):
 
-    if text:
-        sentiment, confidence = analyze_text(text)
-        stress = compute_stress(emotion, sentiment)
-
-        st.success("✅ Analysis Complete")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.metric("Emotion", emotion)
-            st.metric("Sentiment", sentiment)
-
-        with col2:
-            st.metric("Confidence", round(confidence, 2))
-            st.metric("Stress Score", f"{stress}/100")
-
-        st.progress(stress)
-
+    if not text:
+        st.warning("⚠️ Please enter your thoughts first")
     else:
-        st.warning("⚠️ Enter text")
+        with st.spinner("Analyzing..."):
+            sentiment, conf = analyze_text(text)
+            stress = stress_calc(emotion, sentiment)
+
+            st.success("✅ Analysis Complete!")
+
+            # Display results
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Emotion", emotion)
+            
+            with col2:
+                st.metric("Sentiment", sentiment)
+            
+            with col3:
+                st.metric("Stress Level", f"{stress}%")
+
+            # Progress bar
+            st.progress(stress / 100)
+
+            # Stress interpretation
+            if stress >= 70:
+                st.error("🔴 High Stress - Consider taking a break or seeking support")
+            elif stress >= 40:
+                st.warning("🟡 Moderate Stress - Try relaxation techniques")
+            else:
+                st.success("🟢 Low Stress - You're doing great!")
