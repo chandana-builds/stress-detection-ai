@@ -1,13 +1,27 @@
 import streamlit as st
 import os
+import cv2
+import tempfile
+from mtcnn import MTCNN
+from textblob import TextBlob
 
-# -------- DETECT ENVIRONMENT --------
-IS_DEPLOY = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
-
+# -------- CONFIG --------
 st.set_page_config(page_title="Stress Detection AI", layout="centered")
 st.title("🧠 Multi-Modal Stress Detection System")
-
 st.caption("AI-based Emotion + NLP Stress Detection")
+
+# Detect deployment
+IS_DEPLOY = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
+
+# -------- FACE DETECTOR --------
+detector = MTCNN()
+
+def is_face_present(image_path):
+    img = cv2.imread(image_path)
+    if img is None:
+        return False
+    faces = detector.detect_faces(img)
+    return len(faces) > 0
 
 # -------- NLP MODE --------
 nlp_mode = st.selectbox(
@@ -15,17 +29,14 @@ nlp_mode = st.selectbox(
     ["Fast (TextBlob)", "Advanced (AI Model)"]
 )
 
-# -------- FAST NLP --------
+# -------- NLP FUNCTIONS --------
 def analyze_fast(text):
-    from textblob import TextBlob
     blob = TextBlob(text)
     polarity = blob.sentiment.polarity
     sentiment = "Negative" if polarity < 0 else "Positive"
     return sentiment, abs(polarity)
 
-# -------- ADVANCED NLP (ONLY LOCAL) --------
 nlp = None
-
 def get_nlp():
     global nlp
     if nlp is None:
@@ -50,44 +61,47 @@ mode = st.radio(
 
 emotion = "Not detected"
 
-# -------- IMAGE MODES --------
+# -------- IMAGE INPUT --------
 if mode in ["Upload Image", "Capture Image"]:
 
-    if mode == "Upload Image":
-        file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
-    else:
-        file = st.camera_input("Capture Image")
+    file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"]) \
+        if mode == "Upload Image" else st.camera_input("Capture Image")
 
     if file:
         st.image(file, use_column_width=True)
 
-        if not IS_DEPLOY:
-            try:
-                from deepface import DeepFace
-                import tempfile
+        # Save file
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(file.read())
+        image_path = tfile.name
 
-                tfile = tempfile.NamedTemporaryFile(delete=False)
-                tfile.write(file.read())
-
-                result = DeepFace.analyze(
-                    img_path=tfile.name,
-                    actions=['emotion'],
-                    enforce_detection=False
-                )
-                emotion = result[0]['dominant_emotion']
-            except:
-                emotion = "Error"
+        # Check face
+        if not is_face_present(image_path):
+            st.error("❌ No human face detected")
+            emotion = "No Face"
         else:
-            emotion = "Disabled (Cloud Limit)"
+            if not IS_DEPLOY:
+                try:
+                    from deepface import DeepFace
+                    result = DeepFace.analyze(
+                        img_path=image_path,
+                        actions=['emotion'],
+                        enforce_detection=True
+                    )
+                    emotion = result[0]['dominant_emotion']
+                except:
+                    st.error("❌ Error analyzing face")
+                    emotion = "Error"
+            else:
+                emotion = "Face Detected (AI Disabled in Cloud)"
 
-# -------- REAL-TIME --------
-if mode == "Real-Time Webcam":
+# -------- REAL-TIME WEBCAM --------
+elif mode == "Real-Time Webcam":
 
     if IS_DEPLOY:
         st.warning("⚠️ Webcam disabled in cloud deployment")
     else:
         from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-        import cv2
         from deepface import DeepFace
 
         class EmotionDetector(VideoTransformerBase):
@@ -102,12 +116,10 @@ if mode == "Real-Time Webcam":
                         actions=['emotion'],
                         enforce_detection=False
                     )
-                    self.emotion = result[0]['dominant_emotion']
+                    if result and 'dominant_emotion' in result[0]:
+                        self.emotion = result[0]['dominant_emotion']
                 except:
                     pass
-
-                cv2.putText(img, f"{self.emotion}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                 return img
 
         webrtc_ctx = webrtc_streamer(
@@ -118,7 +130,7 @@ if mode == "Real-Time Webcam":
         if webrtc_ctx.video_transformer:
             emotion = webrtc_ctx.video_transformer.emotion
 
-# -------- TEXT --------
+# -------- TEXT INPUT --------
 text = st.text_area("💬 Enter your thoughts")
 
 # -------- STRESS --------
@@ -127,6 +139,8 @@ def compute_stress(emotion, sentiment):
 
     if emotion in ["sad", "angry", "fear"]:
         score += 50
+    elif emotion == "neutral":
+        score += 20
 
     if sentiment == "Negative":
         score += 40
@@ -137,6 +151,7 @@ def compute_stress(emotion, sentiment):
 if st.button("Analyze Stress"):
 
     if text:
+
         sentiment, confidence = analyze_text(text)
         stress = compute_stress(emotion, sentiment)
 
@@ -152,7 +167,15 @@ if st.button("Analyze Stress"):
             st.metric("Confidence", round(confidence, 2))
             st.metric("Stress Score", f"{stress}/100")
 
+        st.subheader("🧠 Stress Level")
         st.progress(stress)
+
+        if stress > 70:
+            st.error("High Stress ⚠️")
+        elif stress > 40:
+            st.warning("Moderate Stress")
+        else:
+            st.success("Low Stress 😊")
 
     else:
         st.warning("⚠️ Enter text")
