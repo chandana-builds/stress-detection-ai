@@ -1,0 +1,9 @@
+streamlit
+deepface
+opencv-python-headless
+mtcnn
+streamlit-webrtc
+transformers
+torch
+pandas
+textblob
