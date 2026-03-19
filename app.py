@@ -89,6 +89,9 @@ if mode in ["Upload", "Camera"]:
                     enforce_detection=True
                 )
                 emotion = result[0]['dominant_emotion']
+            except ImportError:
+                st.info("ℹ️ DeepFace not available. Using face detection only.")
+                emotion = "Face Detected"
             except Exception:
                 emotion = "Face Detected"
         
@@ -122,8 +125,10 @@ elif mode == "Webcam":
         if ctx.video_transformer:
             emotion = ctx.video_transformer.emotion
 
+    except ImportError:
+        st.warning("⚠️ Webcam feature requires additional packages. Please use Upload or Camera mode.")
     except Exception:
-        st.warning("Webcam not supported")
+        st.warning("⚠️ Webcam not supported")
 
 # -------- TEXT --------
 text = st.text_area("Enter your thoughts")

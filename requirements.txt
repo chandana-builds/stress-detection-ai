@@ -1,6 +1,6 @@
-streamlit
-opencv-python-headless
-textblob
-pandas
-deepface
-streamlit-webrtc
+streamlit==1.28.1
+opencv-python-headless==4.8.0.74
+textblob==0.17.1
+pandas==2.0.3
+numpy==1.24.3
+Pillow==10.0.1
