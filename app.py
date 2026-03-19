@@ -23,20 +23,25 @@ except:
 @st.cache_resource
 def load_face_cascade():
     try:
-        return cv2.CascadeClassifier(
+        cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
+        if cascade.empty():
+            return None
+        return cascade
     except Exception as e:
-        st.error(f"Could not load face cascade: {str(e)}")
         return None
 
 face_cascade = load_face_cascade()
 
+# Initialize app safely
 if face_cascade is None:
-    st.error("🔴 Critical error: Could not initialize face detection")
-    st.stop()
+    st.warning("⚠️ Face detection temporarily unavailable. Using text analysis only.")
 
 def detect_face(image_path):
+    if face_cascade is None:
+        return False
+    
     try:
         img = cv2.imread(image_path)
         if img is None:
@@ -53,7 +58,6 @@ def detect_face(image_path):
 
         return len(faces) > 0
     except Exception as e:
-        st.error(f"Face detection error: {str(e)}")
         return False
 
 # -------- EMOTION PREDICTOR (Lightweight) --------
@@ -63,6 +67,9 @@ def predict_emotion_from_face(image_path):
     Lightweight emotion predictor based on face properties (no ML models).
     Analyzes face characteristics like expression patterns.
     """
+    if face_cascade is None:
+        return "neutral"
+    
     try:
         img = cv2.imread(image_path)
         if img is None:
