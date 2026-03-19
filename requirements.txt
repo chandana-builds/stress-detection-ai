@@ -1,15 +1,4 @@
-# Core Streamlit dependencies
 streamlit==1.27.0
-protobuf==4.25.8
-
-# Computer Vision
 opencv-python-headless==4.8.0.74
-
-# NLP
 textblob==0.17.1
-
-# Image processing
 Pillow==9.5.0
-
-# Data processing (minimal)
-numpy>=1.21.0,<2.0

@@ -5,20 +5,36 @@ import tempfile
 from textblob import TextBlob
 import numpy as np
 
+# Suppress warnings
+import warnings
+warnings.filterwarnings('ignore')
+
 st.set_page_config(page_title="Stress Detection AI", layout="centered")
 st.title("🧠 Stress Detection System")
 st.caption("Face + Text based Stress Analysis")
 
-IS_DEPLOY = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true" or os.getenv("STREAMLIT_APP") is not None
+# Detect if running on Streamlit Cloud
+try:
+    IS_DEPLOY = "STREAMLIT_SERVER_HEADLESS" in os.environ or "streamlit" in os.environ.get("SHELL", "")
+except:
+    IS_DEPLOY = False
 
 # -------- FACE DETECTION (STRICT) --------
 @st.cache_resource
 def load_face_cascade():
-    return cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
+    try:
+        return cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+    except Exception as e:
+        st.error(f"Could not load face cascade: {str(e)}")
+        return None
 
 face_cascade = load_face_cascade()
+
+if face_cascade is None:
+    st.error("🔴 Critical error: Could not initialize face detection")
+    st.stop()
 
 def detect_face(image_path):
     try:
@@ -123,10 +139,9 @@ if mode in ["Upload", "Camera"]:
                 emotion = emotion.capitalize()
             
             # Cleanup
-            import os as os_module
             try:
-                os_module.unlink(temp_path)
-            except:
+                os.unlink(temp_path)
+            except Exception:
                 pass
 
         except Exception as e:
