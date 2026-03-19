@@ -1,20 +1,11 @@
 [client]
 showErrorDetails = true
-maxUploadSize = 50
 
 [server]
-maxUploadSize = 50
-enableCORS = true
 headless = true
-port = 8501
-runOnSave = false
-
-[browser]
-serverAddress = "localhost"
-gatherUsageStats = false
 
 [logger]
-level = "info"
+level = "error"
 
 [theme]
 primaryColor = "#FF6B6B"

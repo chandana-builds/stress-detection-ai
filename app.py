@@ -4,24 +4,20 @@ import cv2
 import tempfile
 from textblob import TextBlob
 import numpy as np
+import warnings
 
 # Suppress warnings
-import warnings
 warnings.filterwarnings('ignore')
 
+# ===== PAGE CONFIG =====
 st.set_page_config(page_title="Stress Detection AI", layout="centered")
 st.title("🧠 Stress Detection System")
 st.caption("Face + Text based Stress Analysis")
 
-# Detect if running on Streamlit Cloud
-try:
-    IS_DEPLOY = "STREAMLIT_SERVER_HEADLESS" in os.environ or "streamlit" in os.environ.get("SHELL", "")
-except:
-    IS_DEPLOY = False
-
-# -------- FACE DETECTION (STRICT) --------
+# ===== CASCADE LOADING =====
 @st.cache_resource
 def load_face_cascade():
+    """Load face detection cascade classifier"""
     try:
         cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -29,16 +25,14 @@ def load_face_cascade():
         if cascade.empty():
             return None
         return cascade
-    except Exception as e:
+    except Exception:
         return None
 
 face_cascade = load_face_cascade()
 
-# Initialize app safely
-if face_cascade is None:
-    st.warning("⚠️ Face detection temporarily unavailable. Using text analysis only.")
-
+# ===== FACE DETECTION =====
 def detect_face(image_path):
+    """Detect if image contains human face"""
     if face_cascade is None:
         return False
     
@@ -48,25 +42,20 @@ def detect_face(image_path):
             return False
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
         faces = face_cascade.detectMultiScale(
             gray,
             scaleFactor=1.2,
             minNeighbors=6,
             minSize=(40, 40)
         )
-
         return len(faces) > 0
-    except Exception as e:
+    except Exception:
         return False
 
-# -------- EMOTION PREDICTOR (Lightweight) --------
+# ===== EMOTION PREDICTION =====
 @st.cache_data
 def predict_emotion_from_face(image_path):
-    """
-    Lightweight emotion predictor based on face properties (no ML models).
-    Analyzes face characteristics like expression patterns.
-    """
+    """Predict emotion based on face brightness"""
     if face_cascade is None:
         return "neutral"
     
@@ -81,27 +70,23 @@ def predict_emotion_from_face(image_path):
         if len(faces) == 0:
             return "neutral"
         
-        # Simple heuristic based on face position and size
-        for (x, y, w, h) in faces:
-            # Check face region brightness for simple emotion hints
-            face_region = gray[y:y+h, x:x+w]
-            brightness = np.mean(face_region)
-            
-            # Simple heuristic: brightness variance suggests emotion
-            if brightness > 150:
-                return "happy"  # Bright face often smiling
-            elif brightness < 100:
-                return "sad"     # Dark face often sad
-            else:
-                return "neutral"
+        x, y, w, h = faces[0]
+        face_region = gray[y:y+h, x:x+w]
+        brightness = np.mean(face_region)
         
-        return "neutral"
-    except Exception as e:
+        if brightness > 150:
+            return "happy"
+        elif brightness < 100:
+            return "sad"
+        else:
+            return "neutral"
+    except Exception:
         return "neutral"
 
-# -------- NLP --------
+# ===== TEXT ANALYSIS =====
 @st.cache_data
 def analyze_text(text):
+    """Analyze text sentiment"""
     try:
         blob = TextBlob(text)
         polarity = blob.sentiment.polarity
@@ -111,24 +96,48 @@ def analyze_text(text):
         elif polarity > 0.1:
             return "Positive", polarity
         else:
-            return "Neutral", 0
-    except:
-        return "Neutral", 0
+            return "Neutral", 0.0
+    except Exception:
+        return "Neutral", 0.0
 
-# -------- INPUT --------
+# ===== STRESS CALCULATION =====
+def calculate_stress(emotion, sentiment):
+    """Calculate stress score from emotion and sentiment"""
+    score = 0
+
+    if emotion in ["sad", "angry", "fear"]:
+        score += 50
+    elif emotion == "neutral":
+        score += 20
+    elif emotion == "happy":
+        score += 5
+    else:
+        score += 15
+
+    if sentiment == "Negative":
+        score += 40
+    elif sentiment == "Neutral":
+        score += 15
+
+    return min(score, 100)
+
+# ===== MAIN APP =====
+
+# Show warning if face detection unavailable
+if face_cascade is None:
+    st.warning("⚠️ Face detection module not fully loaded. Using text analysis.")
+
+# Input mode selection
 mode = st.radio("Choose Input", ["Upload", "Camera"])
-
 emotion = "Not detected"
 
-# -------- IMAGE --------
+# Image processing
 if mode in ["Upload", "Camera"]:
-    file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"]) if mode=="Upload" else st.camera_input("Capture Image")
+    file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"]) if mode == "Upload" else st.camera_input("Capture Image")
 
     if file:
-        # Display image
         st.image(file)
 
-        # Save to temporary file
         try:
             tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
             tfile.write(file.read())
@@ -136,16 +145,12 @@ if mode in ["Upload", "Camera"]:
             temp_path = tfile.name
             tfile.close()
 
-            # Check if face exists
             if not detect_face(temp_path):
                 st.error("❌ No human face detected")
                 emotion = "No Face"
             else:
-                # Use lightweight emotion predictor (works on cloud)
-                emotion = predict_emotion_from_face(temp_path)
-                emotion = emotion.capitalize()
-            
-            # Cleanup
+                emotion = predict_emotion_from_face(temp_path).capitalize()
+
             try:
                 os.unlink(temp_path)
             except Exception:
@@ -155,65 +160,32 @@ if mode in ["Upload", "Camera"]:
             st.error(f"Error processing image: {str(e)}")
             emotion = "Error"
 
-# -------- TEXT --------
+# Text input section
 st.markdown("---")
 st.subheader("📝 Your Thoughts")
 text = st.text_area("Enter how you feel", height=100, placeholder="Describe your current feelings...")
 
-# -------- STRESS CALCULATION --------
-def stress_calc(emotion, sentiment):
-    score = 0
-
-    # Emotion scoring
-    if emotion in ["sad", "angry", "fear"]:
-        score += 50
-    elif emotion == "disgust":
-        score += 40
-    elif emotion == "neutral":
-        score += 20
-    elif emotion == "surprise":
-        score += 15
-    elif emotion == "happy":
-        score += 5
-    elif emotion == "Face Detected":
-        score += 15
-
-    # Sentiment scoring
-    if sentiment == "Negative":
-        score += 40
-    elif sentiment == "Neutral":
-        score += 15
-
-    return min(score, 100)
-
-# -------- ANALYZE --------
+# Analysis button
 if st.button("🔍 Analyze", use_container_width=True):
-
     if not text:
         st.warning("⚠️ Please enter your thoughts first")
     else:
         with st.spinner("Analyzing..."):
-            sentiment, conf = analyze_text(text)
-            stress = stress_calc(emotion, sentiment)
+            sentiment, confidence = analyze_text(text)
+            stress = calculate_stress(emotion, sentiment)
 
             st.success("✅ Analysis Complete!")
 
-            # Display results
             col1, col2, col3 = st.columns(3)
-            
             with col1:
                 st.metric("Emotion", emotion)
-            
             with col2:
                 st.metric("Sentiment", sentiment)
-            
             with col3:
                 st.metric("Stress Level", f"{stress}%")
 
-            # Progress bar
             st.progress(stress / 100)
 
-            # Stress interpretation
             if stress >= 70:
                 st.error("🔴 High Stress - Consider taking a break or seeking support")
             elif stress >= 40:
