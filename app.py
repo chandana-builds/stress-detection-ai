@@ -1,164 +1,146 @@
 import streamlit as st
 import cv2
-import tempfile
+import numpy as np
 from textblob import TextBlob
-import os
-import warnings
 
-warnings.filterwarnings('ignore')
+st.set_page_config(page_title="AI Stress Detection", layout="centered")
 
-st.set_page_config(page_title="Stress AI Pro", layout="centered")
-st.title("🧠 Stress Detection System")
-st.caption("Face + Text based Stress Analysis")
+st.title("🧠 Emotion & Stress Detection System")
 
-IS_DEPLOY = os.getenv("RENDER") == "true"
+# ---------------- FACE DETECTOR ----------------
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
 
-# -------- FACE DETECTION --------
-@st.cache_resource
-def load_cascade():
-    try:
-        cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
-        return cascade
-    except Exception as e:
-        st.error(f"Error loading face cascade: {e}")
-        return None
+def detect_faces(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(
+        gray, scaleFactor=1.2, minNeighbors=6, minSize=(80, 80)
+    )
+    return faces
 
-face_cascade = load_cascade()
+# ---------------- EMOTION ----------------
+def detect_emotion(face):
+    gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+    brightness = np.mean(gray)
 
-def detect_face(path):
-    if face_cascade is None:
-        return False
-    
-    try:
-        img = cv2.imread(path)
-        if img is None:
-            return False
+    if brightness > 140:
+        return "Happy 😊"
+    elif brightness < 90:
+        return "Sad 😢"
+    return "Neutral 😐"
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        faces = face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.2,
-            minNeighbors=6,
-            minSize=(40, 40)
-        )
-
-        return len(faces) > 0
-    except Exception:
-        return False
-
-# -------- TEXT ANALYSIS --------
+# ---------------- TEXT ----------------
 def analyze_text(text):
-    blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
+    polarity = TextBlob(text).sentiment.polarity
 
-    if polarity < 0:
+    if polarity < -0.3:
         return "Negative", abs(polarity)
-    elif polarity > 0:
+    elif polarity > 0.3:
         return "Positive", polarity
-    else:
-        return "Neutral", 0
+    return "Neutral", 0
 
-# -------- INPUT --------
-mode = st.radio("Input Method", ["Upload", "Camera", "Webcam"])
+def stress_level(sentiment):
+    if sentiment == "Negative":
+        return 80
+    elif sentiment == "Neutral":
+        return 50
+    return 20
+
+
+# ---------------- MODE ----------------
+mode = st.radio("Choose Input", ["Upload", "Camera", "Live Webcam"])
+
 emotion = "Not detected"
 
-# -------- IMAGE --------
-if mode in ["Upload", "Camera"]:
-    file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"]) if mode=="Upload" else st.camera_input("Capture")
+# ======================================================
+# 📁 UPLOAD
+# ======================================================
+if mode == "Upload":
+    file = st.file_uploader("Upload Image", ["jpg","png","jpeg"])
 
     if file:
-        st.image(file)
+        img = cv2.imdecode(np.frombuffer(file.read(), np.uint8), 1)
+        st.image(img, channels="BGR")
 
-        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-        temp.write(file.read())
-        temp.close()
+        faces = detect_faces(img)
 
-        if not detect_face(temp.name):
-            st.error("❌ No human face detected")
-            emotion = "No Face"
+        if len(faces) == 0:
+            st.error("❌ No face detected")
         else:
-            try:
-                from deepface import DeepFace  # type: ignore
+            (x,y,w,h) = faces[0]
+            face = img[y:y+h, x:x+w]
 
-                result = DeepFace.analyze(
-                    img_path=temp.name,
-                    actions=['emotion'],
-                    enforce_detection=True
-                )
-                emotion = result[0]['dominant_emotion']
-            except ImportError:
-                st.info("ℹ️ DeepFace not available. Using face detection only.")
-                emotion = "Face Detected"
-            except Exception:
-                emotion = "Face Detected"
-        
-        # Cleanup temp file
-        try:
-            os.unlink(temp.name)
-        except Exception:
-            pass
+            emotion = detect_emotion(face)
 
-# -------- WEBCAM --------
-elif mode == "Webcam":
-    try:
-        from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-        from deepface import DeepFace  # type: ignore
+            cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
+            st.image(img, channels="BGR")
 
-        class Detector(VideoTransformerBase):
-            def __init__(self):
-                self.emotion = "Detecting"
+            st.success(f"Emotion: {emotion}")
 
-            def transform(self, frame):
-                img = frame.to_ndarray(format="bgr24")
-                try:
-                    result = DeepFace.analyze(img, actions=['emotion'], enforce_detection=False)
-                    self.emotion = result[0]['dominant_emotion']
-                except Exception:
-                    pass
-                return img
+# ======================================================
+# 📸 CAMERA (FIXED)
+# ======================================================
+elif mode == "Camera":
+    img_file = st.camera_input("Take Photo")
 
-        ctx = webrtc_streamer(key="cam", video_transformer_factory=Detector)
+    if img_file:
+        img = cv2.imdecode(np.frombuffer(img_file.read(), np.uint8), 1)
 
-        if ctx.video_transformer:
-            emotion = ctx.video_transformer.emotion
+        st.image(img, channels="BGR")
 
-    except ImportError:
-        st.warning("⚠️ Webcam feature requires additional packages. Please use Upload or Camera mode.")
-    except Exception:
-        st.warning("⚠️ Webcam not supported")
+        faces = detect_faces(img)
 
-# -------- TEXT --------
-text = st.text_area("Enter your thoughts")
+        if len(faces) == 0:
+            st.error("❌ No face detected")
+        else:
+            (x,y,w,h) = faces[0]
+            face = img[y:y+h, x:x+w]
 
-# -------- STRESS --------
-def calc_stress(emotion, sentiment):
-    score = 0
+            emotion = detect_emotion(face)
+            st.success(f"Emotion: {emotion}")
 
-    if emotion in ["sad","angry","fear"]:
-        score += 50
-    elif emotion == "neutral":
-        score += 20
+# ======================================================
+# 🎥 LIVE WEBCAM (REAL FIX)
+# ======================================================
+elif mode == "Live Webcam":
+    from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+    import av
 
-    if sentiment == "Negative":
-        score += 40
+    class EmotionDetector(VideoTransformerBase):
+        def transform(self, frame):
+            img = frame.to_ndarray(format="bgr24")
 
-    return min(score,100)
+            faces = detect_faces(img)
 
-# -------- ANALYZE --------
+            for (x,y,w,h) in faces:
+                face = img[y:y+h, x:x+w]
+                emotion = detect_emotion(face)
+
+                cv2.rectangle(img,(x,y),(x+w,y+h),(0,255,0),2)
+                cv2.putText(img, emotion, (x,y-10),
+                            cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)
+
+            return img
+
+    webrtc_streamer(key="webcam", video_transformer_factory=EmotionDetector)
+
+
+# ======================================================
+# 💬 TEXT
+# ======================================================
+st.subheader("💬 Your Thoughts")
+text = st.text_area("Type here")
+
 if st.button("Analyze"):
-    if text:
+    if not text:
+        st.warning("Enter text")
+    else:
         sentiment, conf = analyze_text(text)
-        stress = calc_stress(emotion, sentiment)
-
-        st.success("Analysis Done")
+        stress = stress_level(sentiment)
 
         st.write("Emotion:", emotion)
         st.write("Sentiment:", sentiment)
         st.write("Stress:", stress)
 
-        st.progress(stress / 100)
-    else:
-        st.warning("Enter text")
+        st.progress(stress)
