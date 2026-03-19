@@ -2,4 +2,7 @@ streamlit
 textblob
 pandas
 opencv-python-headless
-mtcnn
+deepface
+streamlit-webrtc
+transformers
+torch

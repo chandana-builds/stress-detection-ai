@@ -2,7 +2,6 @@ import streamlit as st
 import os
 import cv2
 import tempfile
-from mtcnn import MTCNN
 from textblob import TextBlob
 
 # -------- CONFIG --------
@@ -13,14 +12,17 @@ st.caption("AI-based Emotion + NLP Stress Detection")
 # Detect deployment
 IS_DEPLOY = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
 
-# -------- FACE DETECTOR --------
-detector = MTCNN()
+# -------- FACE DETECTION (NO TENSORFLOW) --------
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+)
 
 def is_face_present(image_path):
     img = cv2.imread(image_path)
     if img is None:
         return False
-    faces = detector.detect_faces(img)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
     return len(faces) > 0
 
 # -------- NLP MODE --------
@@ -29,7 +31,7 @@ nlp_mode = st.selectbox(
     ["Fast (TextBlob)", "Advanced (AI Model)"]
 )
 
-# -------- NLP FUNCTIONS --------
+# -------- NLP --------
 def analyze_fast(text):
     blob = TextBlob(text)
     polarity = blob.sentiment.polarity
@@ -70,12 +72,12 @@ if mode in ["Upload Image", "Capture Image"]:
     if file:
         st.image(file, use_column_width=True)
 
-        # Save file
+        # Save temp file
         tfile = tempfile.NamedTemporaryFile(delete=False)
         tfile.write(file.read())
         image_path = tfile.name
 
-        # Check face
+        # Face validation
         if not is_face_present(image_path):
             st.error("❌ No human face detected")
             emotion = "No Face"
@@ -93,9 +95,9 @@ if mode in ["Upload Image", "Capture Image"]:
                     st.error("❌ Error analyzing face")
                     emotion = "Error"
             else:
-                emotion = "Face Detected (AI Disabled in Cloud)"
+                emotion = "Face Detected (AI disabled in cloud)"
 
-# -------- REAL-TIME WEBCAM --------
+# -------- WEBCAM --------
 elif mode == "Real-Time Webcam":
 
     if IS_DEPLOY:
@@ -133,7 +135,7 @@ elif mode == "Real-Time Webcam":
 # -------- TEXT INPUT --------
 text = st.text_area("💬 Enter your thoughts")
 
-# -------- STRESS --------
+# -------- STRESS CALCULATION --------
 def compute_stress(emotion, sentiment):
     score = 0
 
