@@ -3,6 +3,9 @@ import cv2
 import tempfile
 from textblob import TextBlob
 import os
+import warnings
+
+warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="Stress AI Pro", layout="centered")
 st.title("🧠 Stress Detection System")
@@ -11,25 +14,40 @@ st.caption("Face + Text based Stress Analysis")
 IS_DEPLOY = os.getenv("RENDER") == "true"
 
 # -------- FACE DETECTION --------
-face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
+@st.cache_resource
+def load_cascade():
+    try:
+        cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+        return cascade
+    except Exception as e:
+        st.error(f"Error loading face cascade: {e}")
+        return None
+
+face_cascade = load_cascade()
 
 def detect_face(path):
-    img = cv2.imread(path)
-    if img is None:
+    if face_cascade is None:
         return False
+    
+    try:
+        img = cv2.imread(path)
+        if img is None:
+            return False
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    faces = face_cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.2,
-        minNeighbors=6,
-        minSize=(40, 40)
-    )
+        faces = face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.2,
+            minNeighbors=6,
+            minSize=(40, 40)
+        )
 
-    return len(faces) > 0
+        return len(faces) > 0
+    except Exception:
+        return False
 
 # -------- TEXT ANALYSIS --------
 def analyze_text(text):
