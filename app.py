@@ -54,8 +54,9 @@ if mode in ["Upload", "Camera"]:
     if file:
         st.image(file)
 
-        temp = tempfile.NamedTemporaryFile(delete=False)
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
         temp.write(file.read())
+        temp.close()
 
         if not detect_face(temp.name):
             st.error("❌ No human face detected")
@@ -70,8 +71,14 @@ if mode in ["Upload", "Camera"]:
                     enforce_detection=True
                 )
                 emotion = result[0]['dominant_emotion']
-            except:
+            except Exception:
                 emotion = "Face Detected"
+        
+        # Cleanup temp file
+        try:
+            os.unlink(temp.name)
+        except Exception:
+            pass
 
 # -------- WEBCAM --------
 elif mode == "Webcam":
@@ -97,7 +104,7 @@ elif mode == "Webcam":
         if ctx.video_transformer:
             emotion = ctx.video_transformer.emotion
 
-    except:
+    except Exception:
         st.warning("Webcam not supported")
 
 # -------- TEXT --------
@@ -129,6 +136,6 @@ if st.button("Analyze"):
         st.write("Sentiment:", sentiment)
         st.write("Stress:", stress)
 
-        st.progress(stress)
+        st.progress(stress / 100)
     else:
         st.warning("Enter text")
