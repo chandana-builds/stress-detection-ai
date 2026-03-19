@@ -2,3 +2,4 @@ streamlit==1.27.0
 opencv-python-headless==4.8.0.74
 textblob==0.17.1
 Pillow==9.5.0
+numpy==1.26.4
