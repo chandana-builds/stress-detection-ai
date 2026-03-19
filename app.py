@@ -81,7 +81,7 @@ if mode in ["Upload", "Camera"]:
             emotion = "No Face"
         else:
             try:
-                from deepface import DeepFace
+                from deepface import DeepFace  # type: ignore
 
                 result = DeepFace.analyze(
                     img_path=temp.name,
@@ -102,7 +102,7 @@ if mode in ["Upload", "Camera"]:
 elif mode == "Webcam":
     try:
         from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-        from deepface import DeepFace
+        from deepface import DeepFace  # type: ignore
 
         class Detector(VideoTransformerBase):
             def __init__(self):
@@ -113,7 +113,7 @@ elif mode == "Webcam":
                 try:
                     result = DeepFace.analyze(img, actions=['emotion'], enforce_detection=False)
                     self.emotion = result[0]['dominant_emotion']
-                except:
+                except Exception:
                     pass
                 return img
 
