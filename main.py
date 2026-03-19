@@ -35,6 +35,8 @@ def detect_stress(emotion, sentiment):
 
     if emotion in ["angry", "fear", "sad"]:
         stress_score += 2
+    elif emotion == "detected":
+        stress_score += 1
     elif emotion == "neutral":
         stress_score += 1
 
@@ -57,13 +59,6 @@ def main():
     print("⚠️  This is a local-only script.")
     print("For web deployment, use: streamlit run app.py\n")
     
-    try:
-        from deepface import DeepFace
-    except ImportError:
-        print("ERROR: deepface not installed")
-        print("Install with: pip install -r requirements.txt")
-        return
-
     # Start webcam
     cap = cv2.VideoCapture(0)
 
@@ -90,14 +85,21 @@ def main():
     # Save captured frame
     cv2.imwrite("captured_face.jpg", frame)
 
-    # Emotion detection using DeepFace
-    try:
-        result = DeepFace.analyze(img_path="captured_face.jpg", actions=['emotion'], silent=True)
-        emotion = result[0]['dominant_emotion']
-    except:
-        emotion = "neutral"
+    # Simple emotion detection from face
+    print(f"\n🎭 Face captured! (Using lightweight analysis)")
+    
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+    
+    if len(faces) > 0:
+        emotion = "Detected"
+    else:
+        emotion = "Not detected"
 
-    print(f"\n🎭 Detected Emotion: {emotion}")
+    print(f"🎭 Detected Emotion Status: {emotion}")
 
     # Text input
     text = input("\n📝 Enter how you feel (text): ").strip()
