@@ -4,8 +4,6 @@ import cv2
 import tempfile
 from textblob import TextBlob
 import numpy as np
-from PIL import Image
-import io
 
 st.set_page_config(page_title="Stress Detection AI", layout="centered")
 st.title("🧠 Stress Detection System")
