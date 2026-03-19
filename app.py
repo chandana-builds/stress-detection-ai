@@ -9,27 +9,39 @@ st.set_page_config(page_title="Stress Detection AI", layout="centered")
 st.title("🧠 Multi-Modal Stress Detection System")
 st.caption("AI-based Emotion + NLP Stress Detection")
 
-# Detect deployment
 IS_DEPLOY = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
 
-# -------- FACE DETECTION (NO TENSORFLOW) --------
+# -------- FACE DETECTION (ROBUST) --------
 face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
 def is_face_present(image_path):
     img = cv2.imread(image_path)
     if img is None:
         return False
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-    return len(faces) > 0
 
-# -------- NLP MODE --------
-nlp_mode = st.selectbox(
-    "Choose NLP Mode:",
-    ["Fast (TextBlob)", "Advanced (AI Model)"]
-)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Try multiple scales for better accuracy
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=4,
+        minSize=(30, 30)
+    )
+
+    # Fallback: upscale and try again
+    if len(faces) == 0:
+        resized = cv2.resize(gray, None, fx=1.5, fy=1.5)
+        faces = face_cascade.detectMultiScale(
+            resized,
+            scaleFactor=1.1,
+            minNeighbors=4,
+            minSize=(30, 30)
+        )
+
+    return len(faces) > 0
 
 # -------- NLP --------
 def analyze_fast(text):
@@ -38,22 +50,9 @@ def analyze_fast(text):
     sentiment = "Negative" if polarity < 0 else "Positive"
     return sentiment, abs(polarity)
 
-nlp = None
-def get_nlp():
-    global nlp
-    if nlp is None:
-        from transformers import pipeline
-        nlp = pipeline("sentiment-analysis")
-    return nlp
-
 def analyze_text(text):
-    if nlp_mode == "Fast (TextBlob)" or IS_DEPLOY:
-        return analyze_fast(text)
-    else:
-        model = get_nlp()
-        result = model(text)[0]
-        sentiment = "Negative" if result['label'] == "NEGATIVE" else "Positive"
-        return sentiment, result['score']
+    # Always safe for cloud
+    return analyze_fast(text)
 
 # -------- INPUT MODE --------
 mode = st.radio(
@@ -72,37 +71,34 @@ if mode in ["Upload Image", "Capture Image"]:
     if file:
         st.image(file, use_column_width=True)
 
-        # Save temp file
         tfile = tempfile.NamedTemporaryFile(delete=False)
         tfile.write(file.read())
         image_path = tfile.name
 
-        # Face validation
         if not is_face_present(image_path):
-            st.error("❌ No human face detected")
+            st.error("❌ No human face detected (try clearer front face)")
             emotion = "No Face"
         else:
-            if not IS_DEPLOY:
-                try:
-                    from deepface import DeepFace
-                    result = DeepFace.analyze(
-                        img_path=image_path,
-                        actions=['emotion'],
-                        enforce_detection=True
-                    )
-                    emotion = result[0]['dominant_emotion']
-                except:
-                    st.error("❌ Error analyzing face")
-                    emotion = "Error"
-            else:
-                emotion = "Face Detected (AI disabled in cloud)"
+            # Try DeepFace safely
+            try:
+                from deepface import DeepFace
+
+                result = DeepFace.analyze(
+                    img_path=image_path,
+                    actions=['emotion'],
+                    enforce_detection=True
+                )
+                emotion = result[0]['dominant_emotion']
+
+            except Exception as e:
+                # Cloud fallback (no crash)
+                emotion = "Face Detected (AI unavailable here)"
+                st.info("ℹ️ Emotion model not available in this environment")
 
 # -------- WEBCAM --------
 elif mode == "Real-Time Webcam":
 
-    if IS_DEPLOY:
-        st.warning("⚠️ Webcam disabled in cloud deployment")
-    else:
+    try:
         from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
         from deepface import DeepFace
 
@@ -132,10 +128,13 @@ elif mode == "Real-Time Webcam":
         if webrtc_ctx.video_transformer:
             emotion = webrtc_ctx.video_transformer.emotion
 
-# -------- TEXT INPUT --------
+    except:
+        st.warning("⚠️ Webcam not supported in this environment")
+
+# -------- TEXT --------
 text = st.text_area("💬 Enter your thoughts")
 
-# -------- STRESS CALCULATION --------
+# -------- STRESS --------
 def compute_stress(emotion, sentiment):
     score = 0
 
@@ -153,7 +152,6 @@ def compute_stress(emotion, sentiment):
 if st.button("Analyze Stress"):
 
     if text:
-
         sentiment, confidence = analyze_text(text)
         stress = compute_stress(emotion, sentiment)
 
@@ -169,15 +167,7 @@ if st.button("Analyze Stress"):
             st.metric("Confidence", round(confidence, 2))
             st.metric("Stress Score", f"{stress}/100")
 
-        st.subheader("🧠 Stress Level")
         st.progress(stress)
-
-        if stress > 70:
-            st.error("High Stress ⚠️")
-        elif stress > 40:
-            st.warning("Moderate Stress")
-        else:
-            st.success("Low Stress 😊")
 
     else:
         st.warning("⚠️ Enter text")
